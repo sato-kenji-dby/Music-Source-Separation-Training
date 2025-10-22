@@ -121,6 +121,15 @@ def run_folder(model, args, config, device, verbose: bool = False):
             os.makedirs(output_dir, exist_ok=True)
 
             output_path = os.path.join(output_dir, f"{fname}.{codec}")
+            # Diagnostic: print stats about estimates to help debug silent outputs
+            try:
+                peak = float(np.abs(estimates).max())
+                print(f"Estimate stats for {instr}: shape={estimates.shape}, peak={peak}")
+                if peak == 0.0:
+                    print(f"Warning: estimated audio for {instr} is all zeros. Check model output or preprocessing.")
+            except Exception as e:
+                print(f"Could not compute stats for estimates ({instr}): {e}")
+
             sf.write(output_path, estimates.T, sr, subtype=subtype)
             print("Wrote file:", output_path)
             if args.draw_spectro > 0:
@@ -163,6 +172,23 @@ def proc_folder(dict_args):
     if args.start_check_point:
         checkpoint = torch.load(args.start_check_point, weights_only=False, map_location='cpu')
         load_start_checkpoint(args, model, checkpoint, type_='inference')
+        # Diagnostic: print simple statistics about model parameters to ensure weights loaded
+        try:
+            total_params = 0
+            abs_sum = 0.0
+            zero_count = 0
+            for p in model.parameters():
+                np_p = p.detach().cpu().numpy()
+                total_params += np_p.size
+                abs_sum += float(np.abs(np_p).sum())
+                zero_count += int((np_p == 0).sum())
+            mean_abs = abs_sum / total_params if total_params else 0.0
+            zero_frac = zero_count / total_params if total_params else 0.0
+            print(f"Model params: total={total_params}, mean_abs={mean_abs:.6e}, zero_fraction={zero_frac:.6f}")
+            if zero_frac > 0.9:
+                print("Warning: >90% of model parameters are exactly zero — checkpoint may not have loaded correctly.")
+        except Exception as e:
+            print(f"Could not compute model parameter diagnostics: {e}")
 
     print("Instruments: {}".format(config.training.instruments))
 
@@ -173,6 +199,16 @@ def proc_folder(dict_args):
     model = model.to(device)
 
     print("Model load time: {:.2f} sec".format(time.time() - model_load_start_time))
+
+    # Disable mixed precision during inference to avoid NaNs produced by autocast
+    # (some Demucs/HTDemucs ops aren't stable under AMP). Keep original config value
+    # for training but force False for inference runs.
+    try:
+        if hasattr(config, 'training') and hasattr(config.training, 'use_amp'):
+            config.training.use_amp = False
+            print('Disabled mixed precision for inference (config.training.use_amp=False)')
+    except Exception:
+        pass
 
     run_folder(model, args, config, device, verbose=True)
 

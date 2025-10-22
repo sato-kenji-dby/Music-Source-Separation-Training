@@ -120,6 +120,19 @@ def demix(
                 if len(batch_data) >= batch_size or i >= mix.shape[1]:
                     arr = torch.stack(batch_data, dim=0)
                     x = model(arr)
+                    # Diagnostic: inspect model output for zeros/nans to help debug silent stems
+                    try:
+                        x_cpu = x.detach().cpu()
+                        # compute simple stats on the batch output
+                        batch_min = float(x_cpu.min())
+                        batch_max = float(x_cpu.max())
+                        batch_mean = float(x_cpu.abs().mean())
+                        # print only on rank 0 to avoid clutter in ddp
+                        if should_print:
+                            print(f"Model batch output stats: min={batch_min:.6e}, max={batch_max:.6e}, mean_abs={batch_mean:.6e}")
+                    except Exception:
+                        if should_print:
+                            print("Could not compute model output stats for this batch")
 
                     if mode == "generic":
                         window = windowing_array.clone() # using clone() fixes the clicks at chunk edges when using batch_size=1
@@ -128,6 +141,15 @@ def demix(
                         elif i >= mix.shape[1]:  # Last audio chunk, no fadeout
                             window[-fade_size:] = 1
 
+                    # Diagnostics: accumulator sums before adding this batch
+                    if should_print:
+                        try:
+                            res_sum_before = float(result.sum().item())
+                            cnt_sum_before = float(counter.sum().item())
+                            print(f"Accumulator sums before batch: result_sum={res_sum_before:.6e}, counter_sum={cnt_sum_before:.6e}")
+                        except Exception:
+                            pass
+
                     for j, (start, seg_len) in enumerate(batch_locations):
                         if mode == "generic":
                             result[..., start:start + seg_len] += x[j, ..., :seg_len].cpu() * window[..., :seg_len]
@@ -135,6 +157,15 @@ def demix(
                         else:
                             result[..., start:start + seg_len] += x[j, ..., :seg_len].cpu()
                             counter[..., start:start + seg_len] += 1.0
+
+                    # Diagnostics: accumulator sums after adding this batch
+                    if should_print:
+                        try:
+                            res_sum_after = float(result.sum().item())
+                            cnt_sum_after = float(counter.sum().item())
+                            print(f"Accumulator sums after batch: result_sum={res_sum_after:.6e}, counter_sum={cnt_sum_after:.6e}")
+                        except Exception:
+                            pass
 
                     batch_data.clear()
                     batch_locations.clear()
