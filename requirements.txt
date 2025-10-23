@@ -48,7 +48,7 @@ pydub
 python-multipart
 torch>=1.7.0
 torchaudio
-numpy=2.3.3
+numpy==2.3.3
 funasr>=0.9.6
 websockets
 modelscope
