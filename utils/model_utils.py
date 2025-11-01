@@ -178,6 +178,82 @@ def demix(
                     # Only update the progress bar here; do not perform any queue/Redis writes.
                     progress_bar.update(step)
 
+
+                    # Best-effort: send ETA to local worker HTTP receiver (non-blocking, debounced)
+                    try:
+                        write_eta_enabled = os.environ.get('TASK_WRITE_ETA', '1').lower() in ('1', 'true', 'yes')
+                        if write_eta_enabled:
+                            task_id_env = os.environ.get('TASK_ID') or os.environ.get('CURRENT_TASK_ID') or os.environ.get('REDIS_TASK_ID')
+                            if task_id_env:
+                                now_ts = __import__('time').time()
+                                last = getattr(progress_bar, '_last_eta_sent', 0)
+                                debounce = float(os.environ.get('TASK_ETA_DEBOUNCE_SECONDS', '5'))
+                                if now_ts - last >= debounce:
+                                    rem = progress_bar.format_dict.get('remaining')
+                                    # Try to interpret tqdm's 'remaining' (seconds) first; if it's
+                                    # unavailable or non-numeric, fall back to a simple remaining
+                                    # chunks estimate (total - n). We only need a numeric value
+                                    # to include in the POST; worker will accept numeric values.
+                                    rem_s = None
+                                    if rem is not None:
+                                        try:
+                                            rem_s = float(rem)
+                                        except Exception:
+                                            rem_s = None
+                                    if rem_s is None:
+                                        try:
+                                            total = getattr(progress_bar, 'total', None)
+                                            n = getattr(progress_bar, 'n', None)
+                                            if total is not None and n is not None:
+                                                remaining_iters = max(0, total - n)
+                                                # Try to compute an iterations-per-second rate. Prefer
+                                                # tqdm's reported 'rate' when available, else fall back
+                                                # to n / elapsed. Only compute ETA seconds when rate>0.
+                                                rate = None
+                                                try:
+                                                    rate = float(progress_bar.format_dict.get('rate') or 0)
+                                                except Exception:
+                                                    rate = None
+                                                if not rate:
+                                                    try:
+                                                        elapsed = float(progress_bar.format_dict.get('elapsed') or 0)
+                                                        if elapsed and n:
+                                                            rate = float(n) / float(elapsed)
+                                                    except Exception:
+                                                        rate = None
+
+                                                if rate and rate > 0:
+                                                    rem_s = float(remaining_iters) / float(rate)
+                                                else:
+                                                    # Can't compute seconds reliably (rate==0 or missing).
+                                                    # Avoid sending raw iteration counts which are not seconds.
+                                                    rem_s = None
+                                        except Exception:
+                                            rem_s = None
+
+                                    if rem_s is not None:
+                                        try:
+                                            # local import to avoid hard dependency at module import time
+                                            from local_services.eta_client import send_eta_http
+                                            # send non-blocking with short timeout
+                                            try:
+                                                send_eta_http(task_id_env, rem_s, timeout=float(os.environ.get('TASK_ETA_HTTP_TIMEOUT', '0.8')))
+                                            except Exception:
+                                                # best-effort only
+                                                pass
+                                        except Exception:
+                                            # ignore any import/usage errors
+                                            pass
+                                        # record last send time
+                                        try:
+                                            progress_bar._last_eta_sent = now_ts
+                                        except Exception:
+                                            pass
+                    except Exception:
+                        # never let ETA sending interfere with inference
+                        pass
+
+
             if progress_bar:
                 progress_bar.close()
 
