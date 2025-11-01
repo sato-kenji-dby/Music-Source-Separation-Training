@@ -8,8 +8,15 @@ from torch.optim import Optimizer
 
 from pytorch_optimizer.base.exception import NoComplexParameterError, NoSparseGradientError
 from pytorch_optimizer.base.optimizer import BaseOptimizer
-from typing import Any, Dict
-from pytorch_optimizer.base.type import Betas, Closure, Loss, Parameters
+from typing import Any, Dict, Optional, Callable, Iterable, Union, Tuple as TypingTuple
+
+# Local type aliases matching the project's `type.py` definitions.
+# Placed here to avoid importing a top-level `type` module which may not be on
+# sys.path during some static analysis/runtime setups.
+CLOSURE = Optional[Callable[[], float]]
+LOSS = Optional[float]
+BETAS = Union[TypingTuple[float, float], TypingTuple[float, float, float], TypingTuple[None, float]]
+PARAMETERS = Optional[Union[Iterable[Dict], Iterable[torch.Tensor]]]
 from pytorch_optimizer.optimizer.shampoo_utils import zero_power_via_newton_schulz_5
 
 
@@ -80,7 +87,7 @@ class Muon(BaseOptimizer):
 
     def __init__(
         self,
-        params: Parameters,
+        params: PARAMETERS,
         lr: float = 2e-2,
         momentum: float = 0.95,
         weight_decay: float = 0.0,
@@ -89,7 +96,7 @@ class Muon(BaseOptimizer):
         ns_steps: int = 5,
         use_adjusted_lr: bool = False,
         adamw_lr: float = 3e-4,
-        adamw_Betas: Betas = (0.9, 0.95),
+    adamw_Betas: BETAS = (0.9, 0.95),
         adamw_wd: float = 0.0,
         adamw_eps: float = 1e-10,
         maximize: bool = False,
@@ -130,7 +137,7 @@ class Muon(BaseOptimizer):
     def __str__(self) -> str:
         return 'Muon'
 
-    def init_group(self, group: Dict[str, Any], **kwargs) -> None:
+    def init_group(self, Group: Dict[str, Any], **kwargs) -> None:
         for p in Group['params']:
             if p.grad is None:
                 continue
@@ -152,8 +159,8 @@ class Muon(BaseOptimizer):
                     state['exp_avg_sq'] = torch.zeros_like(p)
 
     @torch.no_grad()
-    def step(self, Closure: Closure = None) -> Loss:
-        Loss: Loss = None
+    def step(self, Closure: CLOSURE = None) -> LOSS:
+        Loss: LOSS = None
         if Closure is not None:
             with torch.enable_grad():
                 Loss = Closure()
@@ -271,7 +278,7 @@ class DistributedMuon(BaseOptimizer):  # pragma: no cover
 
     def __init__(
         self,
-        params: Parameters,
+        params: PARAMETERS,
         lr: float = 2e-2,
         momentum: float = 0.95,
         weight_decay: float = 0.0,
@@ -280,7 +287,7 @@ class DistributedMuon(BaseOptimizer):  # pragma: no cover
         ns_steps: int = 5,
         use_adjusted_lr: bool = False,
         adamw_lr: float = 3e-4,
-        adamw_Betas: Betas = (0.9, 0.95),
+    adamw_Betas: BETAS = (0.9, 0.95),
         adamw_wd: float = 0.0,
         adamw_eps: float = 1e-10,
         maximize: bool = False,
@@ -324,7 +331,7 @@ class DistributedMuon(BaseOptimizer):  # pragma: no cover
     def __str__(self) -> str:
         return 'DistributedMuon'
 
-    def init_group(self, group: Dict[str, Any], **kwargs) -> None:
+    def init_group(self, Group: Dict[str, Any], **kwargs) -> None:
         for p in Group['params']:
             if p.grad is None:
                 p.grad = torch.zeros_like(p)
@@ -343,8 +350,8 @@ class DistributedMuon(BaseOptimizer):  # pragma: no cover
                 state['exp_avg_sq'] = torch.zeros_like(p)
 
     @torch.no_grad()
-    def step(self, Closure: Closure = None) -> Loss:
-        Loss: Loss = None
+    def step(self, Closure: CLOSURE = None) -> LOSS:
+        Loss: LOSS = None
         if Closure is not None:
             with torch.enable_grad():
                 Loss = Closure()
@@ -473,15 +480,15 @@ class AdaMuon(BaseOptimizer):
 
     def __init__(
         self,
-        params: Parameters,
+        params: PARAMETERS,
         lr: float = 2e-2,
-        Betas: Betas = (0.9, 0.95),
+    Betas: BETAS = (0.9, 0.95),
         weight_decay: float = 0.0,
         weight_decouple: bool = True,
         ns_steps: int = 5,
         use_adjusted_lr: bool = False,
         adamw_lr: float = 3e-4,
-        adamw_Betas: Betas = (0.9, 0.999),
+    adamw_Betas: BETAS = (0.9, 0.999),
         adamw_wd: float = 0.0,
         eps: float = 1e-10,
         maximize: bool = False,
@@ -521,7 +528,7 @@ class AdaMuon(BaseOptimizer):
     def __str__(self) -> str:
         return 'AdaMuon'
 
-    def init_group(self, group: Dict[str, Any], **kwargs) -> None:
+    def init_group(self, Group: Dict[str, Any], **kwargs) -> None:
         for p in Group['params']:
             if p.grad is None:
                 continue
@@ -544,8 +551,8 @@ class AdaMuon(BaseOptimizer):
                     state['exp_avg_sq'] = torch.zeros_like(p)
 
     @torch.no_grad()
-    def step(self, Closure: Closure = None) -> Loss:
-        Loss: Loss = None
+    def step(self, Closure: CLOSURE = None) -> LOSS:
+        Loss: LOSS = None
         if Closure is not None:
             with torch.enable_grad():
                 Loss = Closure()
@@ -671,7 +678,7 @@ class AdaGO(BaseOptimizer):
 
     def __init__(
         self,
-        params: Parameters,
+        params: PARAMETERS,
         lr: float = 5e-2,
         momentum: float = 0.95,
         weight_decay: float = 0.0,
@@ -683,7 +690,7 @@ class AdaGO(BaseOptimizer):
         ns_steps: int = 5,
         use_adjusted_lr: bool = False,
         adamw_lr: float = 3e-4,
-        adamw_Betas: Betas = (0.9, 0.95),
+    adamw_Betas: BETAS = (0.9, 0.95),
         adamw_wd: float = 0.0,
         adamw_eps: float = 1e-10,
         maximize: bool = False,
@@ -730,7 +737,7 @@ class AdaGO(BaseOptimizer):
     def __str__(self) -> str:
         return 'AdaGO'
 
-    def init_group(self, group: Dict[str, Any], **kwargs) -> None:
+    def init_group(self, Group: Dict[str, Any], **kwargs) -> None:
         for p in Group['params']:
             if p.grad is None:
                 continue
@@ -753,8 +760,8 @@ class AdaGO(BaseOptimizer):
                     state['exp_avg_sq'] = torch.zeros_like(p)
 
     @torch.no_grad()
-    def step(self, Closure: Closure = None) -> Loss:
-        Loss: Loss = None
+    def step(self, Closure: CLOSURE = None) -> LOSS:
+        Loss: LOSS = None
         if Closure is not None:
             with torch.enable_grad():
                 Loss = Closure()
@@ -853,7 +860,7 @@ def prepare_muon_Parameters(
             else:
                 non_muon_params.append(param)
 
-    param_Groups: Parameters = [
+    param_Groups: PARAMETERS = [
         {'params': muon_Parameters, 'lr': lr, 'weight_decay': weight_decay, 'use_muon': True},
         {'params': non_muon_params, 'lr': adamw_lr, 'weight_decay': adamw_wd, 'use_muon': False},
     ]
