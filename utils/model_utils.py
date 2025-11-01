@@ -95,6 +95,16 @@ def demix(
             i = 0
             batch_data = []
             batch_locations = []
+            # Prepare optional progress->Redis ETA updater
+            # Control via env vars:
+            # - TASK_ID or CURRENT_TASK_ID (the task identifier used as Redis key suffix)
+            # - TASK_WRITE_ETA (defaults to '1' to enable)
+            # - TASK_ETA_UPDATE_INTERVAL (how many progress updates between writes; default 3)
+            task_id_env = os.environ.get('TASK_ID') or os.environ.get('CURRENT_TASK_ID') or os.environ.get('REDIS_TASK_ID')
+            write_eta_enabled = os.environ.get('TASK_WRITE_ETA', '1').lower() in ('1', 'true', 'yes')
+            eta_update_interval = int(os.environ.get('TASK_ETA_UPDATE_INTERVAL', '3'))
+            eta_update_counter = 0
+
             if pbar and should_print:
                 progress_bar = tqdm(
                     total=mix.shape[1], desc="Processing audio chunks", leave=False
@@ -172,6 +182,32 @@ def demix(
 
                 if progress_bar:
                     progress_bar.update(step)
+                    # Occasionally write remaining ETA (seconds) into Redis hash field task:{task_id}.eta_seconds
+                    try:
+                        if write_eta_enabled and task_id_env:
+                            eta_update_counter += 1
+                            if eta_update_counter % eta_update_interval == 0:
+                                rem = progress_bar.format_dict.get('remaining')
+                                if rem is not None:
+                                    try:
+                                        rem_s = float(rem)
+                                    except Exception:
+                                        rem_s = None
+                                    if rem_s is not None:
+                                                        try:
+                                                            # Delegate to external helper to perform Redis write; helper will import redis lazily
+                                                            from local_services.task_eta import write_eta
+                                                            try:
+                                                                write_eta(task_id_env, rem_s)
+                                                            except Exception:
+                                                                # Best-effort only
+                                                                pass
+                                                        except Exception:
+                                                            # If helper can't be imported, ignore and continue
+                                                            pass
+                    except Exception:
+                        # Defensive: never let ETA-writing break demixing
+                        pass
 
             if progress_bar:
                 progress_bar.close()
